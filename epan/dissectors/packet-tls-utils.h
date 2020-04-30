@@ -501,6 +501,12 @@ typedef struct {
     GHashTable *tls13_server_appdata;
     GHashTable *tls13_early_exporter;
     GHashTable *tls13_exporter;
+
+    /* CLUDGE */
+    GHashTable * client_write_key;
+    GHashTable * client_write_iv;
+    GHashTable * server_write_key;
+    GHashTable * server_write_iv;
 } ssl_master_key_map_t;
 
 gint ssl_get_keyex_alg(gint cipher);
@@ -612,7 +618,7 @@ ssl_generate_pre_master_secret(SslDecryptSession *ssl_session,
  @param ssl_session the store for all the session data
  @return 0 on success */
 extern gint
-ssl_generate_keyring_material(SslDecryptSession*ssl_session);
+ssl_generate_keyring_material(SslDecryptSession*ssl_session,  ssl_master_key_map_t *mk_map);
 
 extern void
 ssl_change_cipher(SslDecryptSession *ssl_session, gboolean server);

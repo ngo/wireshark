@@ -3534,7 +3534,7 @@ void ssl_set_master_secret(guint32 frame_num, address *addr_srv, address *addr_c
     }
 
     ssl_debug_printf("ssl_set_master_secret trying to generate keys\n");
-    if (ssl_generate_keyring_material(ssl)<0) {
+    if (ssl_generate_keyring_material(ssl, NULL)<0) {
         ssl_debug_printf("ssl_set_master_secret can't generate keyring material\n");
         return;
     }

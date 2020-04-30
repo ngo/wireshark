@@ -3409,7 +3409,7 @@ ssl_generate_pre_master_secret(SslDecryptSession *ssl_session,
 
 /* Used for (D)TLS 1.2 and earlier versions (not with TLS 1.3). */
 int
-ssl_generate_keyring_material(SslDecryptSession*ssl_session)
+ssl_generate_keyring_material(SslDecryptSession*ssl_session, ssl_master_key_map_t *mk_map)
 {
     StringInfo  key_block = { NULL, 0 };
     guint8      _iv_c[MAX_BLOCK_SIZE],_iv_s[MAX_BLOCK_SIZE];
@@ -3683,6 +3683,38 @@ ssl_generate_keyring_material(SslDecryptSession*ssl_session)
             s_wk=_key_s;
         }
     }
+
+    // BEGIN HACK
+    if(mk_map != NULL){
+        StringInfo *ms;
+        StringInfo *crandom = &ssl_session->client_random;
+
+        //client write key
+        ms = (StringInfo *)g_hash_table_lookup(mk_map->client_write_key, crandom);
+        if(ms){
+            c_wk = ms->data;
+            encr_key_len = ms->data_len;
+        }
+        //server write key
+        ms = (StringInfo *)g_hash_table_lookup(mk_map->server_write_key, crandom);
+        if(ms){
+            s_wk = ms->data;
+            encr_key_len = ms->data_len;
+        }
+        //client write key
+        ms = (StringInfo *)g_hash_table_lookup(mk_map->client_write_iv, crandom);
+        if(ms){
+            c_iv = ms->data;
+            write_iv_len = ms->data_len;
+        }
+        //client write key
+        ms = (StringInfo *)g_hash_table_lookup(mk_map->server_write_iv, crandom);
+        if(ms){
+            s_iv = ms->data;
+            write_iv_len = ms->data_len;
+        }
+    }
+    // END HACK
 
     /* show key material info */
     if (c_mk != NULL) {
@@ -4926,6 +4958,12 @@ ssl_common_init(ssl_master_key_map_t *mk_map,
     mk_map->tls13_server_appdata = g_hash_table_new(ssl_hash, ssl_equal);
     mk_map->tls13_early_exporter = g_hash_table_new(ssl_hash, ssl_equal);
     mk_map->tls13_exporter = g_hash_table_new(ssl_hash, ssl_equal);
+
+    mk_map->client_write_key = g_hash_table_new(ssl_hash, ssl_equal);
+    mk_map->client_write_iv = g_hash_table_new(ssl_hash, ssl_equal);
+    mk_map->server_write_key = g_hash_table_new(ssl_hash, ssl_equal);
+    mk_map->server_write_iv = g_hash_table_new(ssl_hash, ssl_equal);
+
     ssl_data_alloc(decrypted_data, 32);
     ssl_data_alloc(compressed_data, 32);
 }
@@ -4946,6 +4984,11 @@ ssl_common_cleanup(ssl_master_key_map_t *mk_map, FILE **ssl_keylog_file,
     g_hash_table_destroy(mk_map->tls13_server_appdata);
     g_hash_table_destroy(mk_map->tls13_early_exporter);
     g_hash_table_destroy(mk_map->tls13_exporter);
+    
+    g_hash_table_destroy(mk_map->client_write_key);
+    g_hash_table_destroy(mk_map->client_write_iv);
+    g_hash_table_destroy(mk_map->server_write_key);
+    g_hash_table_destroy(mk_map->server_write_iv);
 
     g_free(decrypted_data->data);
     g_free(compressed_data->data);
@@ -5172,7 +5215,7 @@ ssl_finalize_decryption(SslDecryptSession *ssl, ssl_master_key_map_t *mk_map)
         }
     }
 
-    if (ssl_generate_keyring_material(ssl) < 0) {
+    if (ssl_generate_keyring_material(ssl, mk_map) < 0) {
         ssl_debug_printf("%s can't generate keyring material\n", G_STRFUNC);
         return;
     }
@@ -5375,6 +5418,10 @@ ssl_compile_keyfile_regex(void)
         "|(?:QUIC_)?SERVER_HANDSHAKE_TRAFFIC_SECRET (?<server_handshake>" OCTET "{32})"
         "|(?:QUIC_)?CLIENT_TRAFFIC_SECRET_0 (?<client_appdata>" OCTET "{32})"
         "|(?:QUIC_)?SERVER_TRAFFIC_SECRET_0 (?<server_appdata>" OCTET "{32})"
+        "|(?:QUIC_)?CLIENT_WRITE_KEY (?<client_write_key>" OCTET "{32})"
+        "|(?:QUIC_)?CLIENT_WRITE_IV (?<client_write_iv>" OCTET "{32})"
+        "|(?:QUIC_)?SERVER_WRITE_KEY (?<server_write_key>" OCTET "{32})"
+        "|(?:QUIC_)?SERVER_WRITE_IV (?<server_write_iv>" OCTET "{32})"
         "|EARLY_EXPORTER_SECRET (?<early_exporter>" OCTET "{32})"
         "|EXPORTER_SECRET (?<exporter>" OCTET "{32})"
         ") (?<derived_secret>" OCTET "+)";
@@ -5418,6 +5465,11 @@ tls_keylog_process_lines(const ssl_master_key_map_t *mk_map, const guint8 *data,
         { "server_appdata",     mk_map->tls13_server_appdata },
         { "early_exporter",     mk_map->tls13_early_exporter },
         { "exporter",           mk_map->tls13_exporter },
+        /* CLUDGE */
+        { "client_write_key",   mk_map->client_write_key },
+        { "server_write_key",   mk_map->server_write_key },
+        { "client_write_iv",    mk_map->client_write_iv },
+        { "server_write_iv",    mk_map->server_write_iv },
     };
 
     /* The format of the file is a series of records with one of the following formats:
